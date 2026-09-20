@@ -14,3 +14,7 @@ WebView + aubiojs + muted scout `<audio>` failed: `aubio failed`, ~10s of FX the
 - **Beats:** flux + BPM grid (verses still tick)
 - **Library:** MediaStore albums (no recursive storage walk)
 - autoedit tree is left alone
+
+## v0.2
+
+BPM is **locked** after the first good window (tiny EMA only if within 6%). Close double-hits snap to the grid. Flux ignores sub-bass bloom. Saturation min/max per song scales FX to ~30% at the loudest part. Playback is process-wide + MediaSession notification. Gallery images (≤16). Double-tap fullscreen.

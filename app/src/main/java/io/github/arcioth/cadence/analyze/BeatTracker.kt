@@ -1,15 +1,24 @@
 package io.github.arcioth.cadence.analyze
 
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
 data class Beat(
     val time: Float,
     val intensity: Float,
-    val kind: Kind = Kind.Beat,
-) {
-    enum class Kind { Beat, Kick }
-}
+    val energy: Float = intensity,
+)
+
+data class Analysis(
+    val beats: List<Beat>,
+    val bpm: Float,
+    val localBpm: Float,
+    val energy: Float,
+)
 
 object BeatTracker {
     const val TARGET_SR = 11025
+    const val PRIMER_SEC = 0.08f
     private const val N = 1024
     private const val HOP = 512
     private val hann = FloatArray(N) { i ->
@@ -31,17 +40,24 @@ object BeatTracker {
         return out
     }
 
-    fun analyze(mono: FloatArray, startTime: Float, sr: Int = TARGET_SR): Pair<List<Beat>, Float> {
+    fun analyze(mono: FloatArray, startTime: Float, sr: Int = TARGET_SR, lockedBpm: Float = 0f): Analysis {
         val (flux, hopTime) = spectralFlux(mono, sr)
-        if (flux.isEmpty()) return emptyList<Beat>() to 0f
-        val bpm = estimateBpm(flux, hopTime)
+        if (flux.isEmpty()) return Analysis(emptyList(), lockedBpm, 0f, 0f)
+        val energy = flux.average().toFloat()
+        val local = estimateBpm(flux, hopTime)
+        val bpm = if (lockedBpm > 1f) lockedBpm else local
         val duration = mono.size.toFloat() / sr
-        val beats = beatsFromTempo(flux, hopTime, bpm, duration).map {
-            it.copy(time = it.time + startTime)
-        }
-        return beats to bpm
+        var beats = beatsFromTempo(flux, hopTime, bpm, duration)
+        beats = snapBeats(beats, bpm)
+        if (startTime < 0.2f) beats = beats.filter { it.time >= PRIMER_SEC }
+        beats = beats.map { it.copy(time = it.time + startTime) }
+        return Analysis(beats, bpm, local, energy)
     }
 
+    /**
+     * Broadband flux, but sub-bass is down-weighted so hats/snare/mids
+     * can win the onset instead of a long bass bloom.
+     */
     internal fun spectralFlux(mono: FloatArray, sr: Int): Pair<FloatArray, Float> {
         val hopTime = HOP.toFloat() / sr
         val frames = ((mono.size - N) / HOP).coerceAtLeast(0)
@@ -49,6 +65,7 @@ object BeatTracker {
         val prev = FloatArray(N / 2)
         val re = FloatArray(N)
         val im = FloatArray(N)
+        val ny = N / 2
         var fi = 0
         var i = 0
         while (i + N < mono.size && fi < frames) {
@@ -62,10 +79,10 @@ object BeatTracker {
             fftRadix2(re, im)
             var f = 0f
             var k = 1
-            while (k < N / 2) {
+            while (k < ny) {
                 val mag = kotlin.math.hypot(re[k], im[k])
                 val d = mag - prev[k]
-                if (d > 0f) f += d
+                if (d > 0f) f += d * bandWeight(k, ny)
                 prev[k] = mag
                 k++
             }
@@ -73,6 +90,18 @@ object BeatTracker {
             i += HOP
         }
         return flux to hopTime
+    }
+
+    /** bin 0 ~ 0 Hz, ny ~ Nyquist (5512 Hz at 11 kHz). */
+    private fun bandWeight(k: Int, ny: Int): Float {
+        val hz = k * (TARGET_SR.toFloat() / (2 * ny))
+        return when {
+            hz < 80f -> 0.15f
+            hz < 180f -> 0.45f
+            hz < 2000f -> 1.35f
+            hz < 6000f -> 1.15f
+            else -> 0.7f
+        }
     }
 
     internal fun estimateBpm(flux: FloatArray, hopTime: Float, minBpm: Float = 70f, maxBpm: Float = 180f): Float {
@@ -89,7 +118,7 @@ object BeatTracker {
                 i++
             }
             val bpm = 60f / (lag * hopTime)
-            val prefer = 1f - kotlin.math.abs(bpm - 120f) / 180f
+            val prefer = 1f - abs(bpm - 120f) / 180f
             val score = s * (0.75f + 0.25f * prefer)
             if (score > best) {
                 best = score
@@ -126,13 +155,32 @@ object BeatTracker {
         while (t < duration - 0.02f && out.size < 8000) {
             val fi = (t / hopTime).toInt().coerceIn(0, flux.lastIndex)
             val onset = flux[fi]
-            val intensity = (onset / (mean * 2f)).coerceIn(0.18f, 1f)
-            out.add(Beat(t, intensity, Beat.Kind.Beat))
-            val kickAt = (fi + (0.11f / hopTime).toInt()).coerceAtMost(flux.lastIndex)
-            if (flux[kickAt] > onset * 0.7f && flux[kickAt] > mean) {
-                out.add(Beat(t + 0.11f, (flux[kickAt] / (mean * 2f)).coerceIn(0.18f, 1f), Beat.Kind.Kick))
-            }
+            val intensity = (onset / (mean * 2f)).coerceIn(0.2f, 1f)
+            out.add(Beat(t, intensity, onset))
             t += period
+        }
+        return out
+    }
+
+    /** Close pair: keep the hit closer to the locked BPM grid. */
+    internal fun snapBeats(beats: List<Beat>, bpm: Float): List<Beat> {
+        if (beats.isEmpty() || bpm <= 1f) return beats
+        val period = 60f / bpm
+        val minGap = period * 0.45f
+        val sorted = beats.sortedBy { it.time }
+        val phase = sorted.first().time
+        val out = ArrayList<Beat>(sorted.size)
+        for (b in sorted) {
+            val last = out.lastOrNull()
+            if (last != null && b.time - last.time < minGap) {
+                val err = { x: Beat ->
+                    val k = ((x.time - phase) / period).roundToInt()
+                    abs(x.time - (phase + k * period))
+                }
+                if (err(b) < err(last)) out[out.lastIndex] = b
+            } else {
+                out.add(b)
+            }
         }
         return out
     }

@@ -3,6 +3,7 @@ package io.github.arcioth.cadence.analyze
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 import kotlin.math.sin
 
 class BeatTrackerTest {
@@ -49,11 +50,37 @@ class BeatTrackerTest {
     }
 
     @Test
+    fun closeHitsKeepGridWinner() {
+        val bpm = 120f
+        val period = 0.5f
+        val beats = listOf(
+            Beat(1.00f, 0.4f),
+            Beat(1.08f, 0.9f),
+            Beat(1.50f, 0.8f),
+        )
+        val out = BeatTracker.snapBeats(beats, bpm)
+        assertEquals(2, out.size)
+        assertTrue(abs(out[0].time - 1.00f) < 0.02f)
+        assertTrue(abs(out[1].time - 1.50f) < 0.02f)
+    }
+
+    @Test
+    fun lockedBpmUsedForGrid() {
+        val sr = BeatTracker.TARGET_SR
+        val mono = clickTrack(sr, 6f, 120f)
+        val a = BeatTracker.analyze(mono, 0f, sr, lockedBpm = 120f)
+        assertEquals(120f, a.bpm, 0.01f)
+        val gaps = a.beats.zipWithNext { x, y -> y.time - x.time }
+        assertTrue(gaps.isNotEmpty())
+        assertTrue(gaps.all { abs(it - 0.5f) < 0.08f })
+    }
+
+    @Test
     fun sineHasNoStrongGrid() {
         val sr = BeatTracker.TARGET_SR
         val n = sr * 2
         val s = FloatArray(n) { i -> sin(2.0 * Math.PI * 440.0 * i / sr).toFloat() * 0.2f }
-        val (beats, _) = BeatTracker.analyze(s, 0f, sr)
-        assertTrue(beats.size < 80)
+        val a = BeatTracker.analyze(s, 0f, sr)
+        assertTrue(a.beats.size < 80)
     }
 }

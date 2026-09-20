@@ -11,6 +11,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
+
+data class Saturation(val min: Float = 1f, val max: Float = 1f) {
+    fun norm(energy: Float): Float {
+        val span = (max - min).coerceAtLeast(1e-4f)
+        return ((energy - min) / span).coerceIn(0f, 1f)
+    }
+}
 
 class Lookahead(private val context: Context, private val scope: CoroutineScope) {
     private val _beats = MutableStateFlow<List<Beat>>(emptyList())
@@ -19,14 +27,24 @@ class Lookahead(private val context: Context, private val scope: CoroutineScope)
     val bpm: StateFlow<Float> = _bpm
     private val _ahead = MutableStateFlow(0f)
     val ahead: StateFlow<Float> = _ahead
+    private val _sat = MutableStateFlow(Saturation())
+    val sat: StateFlow<Saturation> = _sat
 
     private var job: Job? = null
     private var mappedUntilUs = 0L
+    private var lockedBpm = 0f
+    private var satMin = Float.MAX_VALUE
+    private var satMax = 1e-6f
 
     fun start(uri: Uri, durationMs: Long, positionMs: AtomicLong) {
         stop()
         mappedUntilUs = 0L
+        lockedBpm = 0f
+        satMin = Float.MAX_VALUE
+        satMax = 1e-6f
         _beats.value = emptyList()
+        _bpm.value = 0f
+        _sat.value = Saturation()
         job = scope.launch(Dispatchers.Default) {
             val durationUs = (durationMs * 1000L).coerceAtLeast(1_000_000L)
             while (isActive) {
@@ -51,10 +69,16 @@ class Lookahead(private val context: Context, private val scope: CoroutineScope)
                     if (decoded != null) {
                         val (mono, startUs) = decoded
                         val startSec = startUs / 1_000_000f
-                        val (more, bpm) = BeatTracker.analyze(mono, startSec)
-                        if (bpm > 1f) _bpm.value = bpm
-                        if (more.isNotEmpty()) {
-                            _beats.value = (_beats.value + more).distinctBy { (it.time * 100).toInt() }
+                        val a = BeatTracker.analyze(mono, startSec, lockedBpm = lockedBpm)
+                        lockBpm(a.localBpm)
+                        if (a.energy > 0f) {
+                            if (a.energy < satMin) satMin = a.energy
+                            if (a.energy > satMax) satMax = a.energy
+                            _sat.value = Saturation(satMin, satMax)
+                        }
+                        if (a.beats.isNotEmpty()) {
+                            val merged = BeatTracker.snapBeats(_beats.value + a.beats, lockedBpm.takeIf { it > 1f } ?: a.bpm)
+                            _beats.value = merged
                         }
                     }
                 } catch (_: Throwable) {
@@ -64,6 +88,22 @@ class Lookahead(private val context: Context, private val scope: CoroutineScope)
             }
         }
     }
+
+    private fun lockBpm(local: Float) {
+        if (local <= 1f) return
+        if (lockedBpm < 1f) {
+            lockedBpm = local
+            _bpm.value = local
+            return
+        }
+        val drift = abs(local - lockedBpm) / lockedBpm
+        if (drift < 0.06f) {
+            lockedBpm = lockedBpm * 0.92f + local * 0.08f
+            _bpm.value = lockedBpm
+        }
+    }
+
+    fun isRunning(): Boolean = job?.isActive == true
 
     fun stop() {
         job?.cancel()
