@@ -5,10 +5,11 @@ import android.app.Activity
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.provider.Settings
 import android.text.format.DateFormat
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -74,6 +75,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import io.github.arcioth.cadence.App
@@ -92,15 +96,12 @@ private val Pink = Color(0xFFEC4899)
 private val Mute = Color(0xFF8AA0B2)
 private val Panel = Color(0xFF101826)
 
-private val startPerms = buildList {
-    if (Build.VERSION.SDK_INT >= 33) {
-        add(Manifest.permission.READ_MEDIA_AUDIO)
-        add(Manifest.permission.READ_MEDIA_IMAGES)
-        add(Manifest.permission.POST_NOTIFICATIONS)
-    } else {
-        add(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
-}.toTypedArray()
+private fun audioPerm(): String =
+    if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
+    else Manifest.permission.READ_EXTERNAL_STORAGE
+
+private fun hasAudio(ctx: android.content.Context): Boolean =
+    ContextCompat.checkSelfPermission(ctx, audioPerm()) == PackageManager.PERMISSION_GRANTED
 
 @Composable
 fun Ph(glyph: String, modifier: Modifier = Modifier, color: Color = Color.White, size: Int = 22) {
@@ -117,15 +118,21 @@ fun Ph(glyph: String, modifier: Modifier = Modifier, color: Color = Color.White,
 @Composable
 fun CadenceRoot() {
     val ctx = LocalContext.current
-    var granted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(ctx, if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE)
-                == PackageManager.PERMISSION_GRANTED,
-        )
+    var granted by remember { mutableStateOf(hasAudio(ctx)) }
+    val askAudio = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted = it || hasAudio(ctx) }
+    val askNotify = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    val lifecycle = LocalLifecycleOwner.current
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) granted = hasAudio(ctx)
+        }
+        lifecycle.lifecycle.addObserver(obs)
+        onDispose { lifecycle.lifecycle.removeObserver(obs) }
     }
-    val launch = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { granted = it[Manifest.permission.READ_MEDIA_AUDIO] == true || it[Manifest.permission.READ_EXTERNAL_STORAGE] == true }
 
     if (!granted) {
         Column(
@@ -136,24 +143,35 @@ fun CadenceRoot() {
             Spacer(Modifier.height(8.dp))
             Text("Music, on the beat.", color = Color.White, fontSize = 18.sp, fontFamily = Montserrat)
             Spacer(Modifier.height(16.dp))
-            Text("Allow music and notifications.", color = Mute, fontFamily = Montserrat)
+            Text("Cadence needs access to music on this phone.", color = Mute, fontFamily = Montserrat)
             Spacer(Modifier.height(24.dp))
             Button(
-                onClick = { launch.launch(startPerms) },
+                onClick = { askAudio.launch(audioPerm()) },
                 colors = ButtonDefaults.buttonColors(containerColor = Pink, contentColor = Bg),
-            ) { Text("Allow", fontFamily = Montserrat) }
+            ) { Text("Allow music", fontFamily = Montserrat) }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Open settings",
+                color = Ice,
+                fontFamily = Montserrat,
+                modifier = Modifier.clickable {
+                    ctx.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                },
+            )
         }
         return
     }
 
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
-    val notifyLaunch = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) {
         albums = Library.load(ctx)
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            notifyLaunch.launch(Manifest.permission.POST_NOTIFICATIONS)
+            askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
     var open by remember { mutableStateOf<Album?>(null) }
