@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-20 (v0.3)
+
+- Crash: `startForegroundService` never posted a notification (also why the player notification was missing). Service now `startForeground` immediately + Media3 notification.
+- Album search + compact grid toggle. Montserrat + Phosphor icons. Status bar hidden; clock + battery HUD.
+- Shake follows time since beat and decays with the envelope. HSB is a real ColorMatrix on the image.
+- Coil loads images at 1280px max to stop OOM.
+
 ## 2026-09-20 (v0.2)
 
 - Beats: mid/high flux (less bass bloom), locked BPM, snap close doubles to the grid, skip MP3 primer.

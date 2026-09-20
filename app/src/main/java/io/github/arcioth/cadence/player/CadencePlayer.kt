@@ -2,9 +2,8 @@ package io.github.arcioth.cadence.player
 
 import android.content.Context
 import android.content.Intent
-import android.os.Build
-import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.arcioth.cadence.library.Album
@@ -29,7 +28,18 @@ class CadencePlayer(private val context: Context) {
         this.tracks = album.tracks
         if (album.tracks.isEmpty()) return
         exo.setMediaItems(
-            album.tracks.map { MediaItem.fromUri(it.uri) },
+            album.tracks.map { t ->
+                MediaItem.Builder()
+                    .setUri(t.uri)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(t.title)
+                            .setArtist(album.artist)
+                            .setAlbumTitle(album.name)
+                            .build(),
+                    )
+                    .build()
+            },
             start.coerceIn(0, album.tracks.lastIndex),
             0L,
         )
@@ -60,10 +70,9 @@ class CadencePlayer(private val context: Context) {
     }
 
     private fun startService() {
-        val i = Intent(context, PlaybackService::class.java)
+        val i = Intent(context.applicationContext, PlaybackService::class.java)
         try {
-            if (Build.VERSION.SDK_INT >= 26) ContextCompat.startForegroundService(context, i)
-            else context.startService(i)
+            context.applicationContext.startService(i)
         } catch (_: Throwable) { }
     }
 }
