@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-20 — halted
+
+User halted the project. HANDOFF signed. Last code: `9c17812` (permission screen: audio-only request, resume re-check, settings link).
+
+## 2026-09-20 (v0.3.1)
+
+- Permission screen: request only `READ_MEDIA_AUDIO` (Android 16 dropped the bundled audio+images+notify dialog). Re-check on resume. Open settings. Status bar stays until grant.
+
 ## 2026-09-20 (v0.3)
 
 - Crash: `startForegroundService` never posted a notification (also why the player notification was missing). Service now `startForeground` immediately + Media3 notification.

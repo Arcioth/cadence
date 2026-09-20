@@ -1,5 +1,7 @@
 # Cadence (Grok)
 
+**HALTED 2026-09-20.** Read `HANDOFF.md` before touching anything.
+
 Native Android beat player. Not Capacitor. Not autoedit.
 
 - Folder/album of MP3s is a project (MediaStore).
