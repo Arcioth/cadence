@@ -13,7 +13,8 @@ class CadencePlayer(context: Context) {
     }
 
     fun setQueue(tracks: List<Track>, start: Int) {
-        exo.setMediaItems(tracks.map { MediaItem.fromUri(it.uri) }, start, 0L)
+        if (tracks.isEmpty()) return
+        exo.setMediaItems(tracks.map { MediaItem.fromUri(it.uri) }, start.coerceIn(0, tracks.lastIndex), 0L)
         exo.prepare()
         exo.playWhenReady = true
     }

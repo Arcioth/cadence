@@ -58,6 +58,7 @@ import io.github.arcioth.cadence.library.Album
 import io.github.arcioth.cadence.library.Library
 import io.github.arcioth.cadence.player.CadencePlayer
 import kotlinx.coroutines.isActive
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.exp
 import kotlin.random.Random
 
@@ -165,17 +166,18 @@ private fun PlayerScreen(album: Album, onBack: () -> Unit) {
     var env by remember { mutableFloatStateOf(0f) }
     var fx by remember { mutableIntStateOf(0) }
     var lastHit by remember { mutableFloatStateOf(-1f) }
+    val posAtom = remember { AtomicLong(0L) }
 
     DisposableEffect(album) {
         player.setQueue(album.tracks, 0)
         val t0 = album.tracks[0]
-        look.start(t0.uri, t0.durationMs) { player.position() }
+        look.start(t0.uri, t0.durationMs, posAtom)
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 val i = player.index().coerceIn(0, album.tracks.lastIndex)
                 index = i
                 val tr = album.tracks[i]
-                look.start(tr.uri, tr.durationMs) { player.position() }
+                look.start(tr.uri, tr.durationMs, posAtom)
             }
         }
         player.exo.addListener(listener)
@@ -190,6 +192,7 @@ private fun PlayerScreen(album: Album, onBack: () -> Unit) {
         while (isActive) {
             withFrameNanos { }
             pos = player.position()
+            posAtom.set(pos)
             dur = player.duration()
             playing = player.exo.isPlaying
             index = player.index().coerceIn(0, album.tracks.lastIndex)
@@ -301,7 +304,7 @@ private fun PlayerScreen(album: Album, onBack: () -> Unit) {
                         .fillMaxWidth()
                         .clickable {
                             player.exo.seekTo(i, 0)
-                            look.start(tr.uri, tr.durationMs) { player.position() }
+                            look.start(tr.uri, tr.durationMs, posAtom)
                         }
                         .padding(vertical = 10.dp),
                     maxLines = 1,

@@ -2,6 +2,7 @@ package io.github.arcioth.cadence.analyze
 
 import android.content.Context
 import android.media.MediaCodec
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
@@ -24,10 +25,14 @@ object WindowDecoder {
             extractor.selectTrack(track)
             val format = extractor.getTrackFormat(track)
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
-            val srcSr = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            val ch = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+            val srcSr = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            } else 44100
+            val ch = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+            } else 2
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-            codec = MediaCodec.createDecoderByType(mime)
+            codec = softwareDecoder(mime) ?: MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
             val chunks = ArrayList<ShortArray>(32)
@@ -85,6 +90,19 @@ object WindowDecoder {
             try { codec?.release() } catch (_: Throwable) {}
             try { extractor.release() } catch (_: Throwable) {}
         }
+    }
+
+    private fun softwareDecoder(mime: String): MediaCodec? {
+        val list = MediaCodecList(MediaCodecList.ALL_CODECS)
+        for (info in list.codecInfos) {
+            if (info.isEncoder) continue
+            if (info.supportedTypes.none { it.equals(mime, ignoreCase = true) }) continue
+            val n = info.name.lowercase()
+            if ("google" in n || "c2.android" in n || n.contains(".sw.")) {
+                return try { MediaCodec.createByCodecName(info.name) } catch (_: Throwable) { null }
+            }
+        }
+        return null
     }
 
     private fun toMonoFloat(pcm: ShortArray, ch: Int): FloatArray {
