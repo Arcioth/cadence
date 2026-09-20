@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Cadence" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#05080C</item>
+        <item name="android:navigationBarColor">#05080C</item>
+        <item name="android:windowBackground">#05080C</item>
+    </style>
+</resources>
